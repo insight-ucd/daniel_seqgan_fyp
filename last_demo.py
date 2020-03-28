@@ -88,7 +88,7 @@ def main():
     track_keys = []
     for key in all_tracks.keys():
         track_keys.append(key)
-    words = ['_START'] + list
+    words = ['_START'] + track_keys
     print(words)
 
     print("At type: ",type(all_tracks))
