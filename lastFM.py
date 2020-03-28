@@ -18,6 +18,8 @@ import statistics
 
 def read_data(nRows=None):
     start_time = time.time()
+    colab_dir = "/content/gdrive/My Drive/FYP/lastfm/userid-timestamp-artid-artname-traid-traname.tsv"
+    comp_dir = "/Users/dan/Desktop/FYP/lastfm/userid-timestamp-artid-artname-traid-traname.tsv"
 
     df1 = pd.read_csv('/Users/dan/Desktop/FYP/lastfm/userid-timestamp-artid-artname-traid-traname.tsv', engine='python',
                       nrows=nRows, header=None, sep='\\t',
