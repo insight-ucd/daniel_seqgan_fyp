@@ -10,7 +10,7 @@ To execute the code in this project:
 
 *Or, alternatively* 
 
-1) Download seqGAN.ipynb
+1) Download seqGAN.ipynb and requirements.txt
 
 2) Run all cells of seqGAN.ipynb
 
