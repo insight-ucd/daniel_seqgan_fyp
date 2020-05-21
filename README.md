@@ -6,13 +6,15 @@ To execute the code in this project:
 
 1) Clone either the entrie repository 
 
-2) Run SeqGAN.py
+2) Run seqGAN.py
 
-*Or* 
+*Or, alternatively* 
 
-1) Download SeqGAN.ipynb and requirements.txt
+1) Download seqGAN.ipynb and requirements.txt
 
-2) Run all cells of SeqGAN.ipynb
+2) Run all cells of seqGAN.ipynb
 
 
 For further details and results, see Report.pdf
+
+log.txt contains a log containing output of the model when using 100,000 lines of the dataset.
