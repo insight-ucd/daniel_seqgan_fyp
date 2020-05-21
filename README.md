@@ -16,5 +16,3 @@ To execute the code in this project:
 
 
 For further details and results, see Report.pdf
-
-log.txt contains a log containing output of the model when using 100,000 lines of the dataset.
