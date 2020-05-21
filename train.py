@@ -1,14 +1,6 @@
-from __future__ import print_function
-
-__doc__ = """Training utility functions."""
-
-import numpy as np
-import random
-
-
 def train_epoch(sess, trainable_model, num_iter,
                 proportion_supervised, g_steps, d_steps,
-                next_sequence, verify_sequence=None,
+                next_sequence, results, epoch, verify_sequence=None,
                 words=None,
                 proportion_generated=0.5):
     """Perform training for model.
@@ -19,7 +11,7 @@ def train_epoch(sess, trainable_model, num_iter,
     proportion_supervised: what proportion of iterations should the generator
         be trained in a supervised manner (rather than trained via discriminator)
     g_steps: number of generator training steps per iteration
-    d_steps: number of discriminator training steps per iteration
+    d_steps: number of discriminator t raining steps per iteration
     next_sequence: function that returns a groundtruth sequence
     verify_sequence: function that checks a generated sequence, returning True/False
     words:  array of words (to map indices back to words)
@@ -65,13 +57,22 @@ def train_epoch(sess, trainable_model, num_iter,
             else:
                 _, d_loss = trainable_model.train_d_gen_step(sess)
             d_losses.append(d_loss)
+    
 
+    results['d_losses'][epoch] = np.mean(d_losses)
+    results['supervised_g_losses'][epoch] = np.mean(supervised_g_losses)
+    results['unsupervised_g_losses'][epoch] = np.mean(unsupervised_g_losses)
+    results['supervised_generations'][epoch] = [words[x] if words else x for x in supervised_gen_x] if supervised_gen_x is not None else None
+    results['unsupervised_generations'][epoch] = [words[x] if words else x for x in unsupervised_gen_x] if unsupervised_gen_x is not None else None
+    results['rewards'][epoch] = np.mean(expected_rewards, axis=0)
     print('epoch statistics:')
-    print('>>>> discriminator loss:', np.mean(d_losses))
-    print('>>>> generator loss:', np.mean(supervised_g_losses), np.mean(unsupervised_g_losses))
+    print('>>>> discriminator loss:', results['d_losses'][epoch])
+    
+    print('>>>> generator loss:', results['supervised_g_losses'][epoch], results['unsupervised_g_losses'][epoch])
+
     if verify_sequence is not None:
         print('>>>> correct generations (supervised, unsupervised):', np.mean(supervised_correct_generation), np.mean(unsupervised_correct_generation))
     print('>>>> sampled generations (supervised, unsupervised):',)
-    print([words[x] if words else x for x in supervised_gen_x] if supervised_gen_x is not None else None,)
-    print([words[x] if words else x for x in unsupervised_gen_x] if unsupervised_gen_x is not None else None)
-    print('>>>> expected rewards:', np.mean(expected_rewards, axis=0))
+    print(results['supervised_generations'][epoch],)
+    print(results['unsupervised_generations'][epoch])
+    print('>>>> expected rewards:', results['rewards'][epoch])
