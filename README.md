@@ -13,3 +13,6 @@ To execute the code in this project:
 1) Download SeqGAN.ipynb and requirements.txt
 
 2) Run all cells of SeqGAN.ipynb
+
+
+For further details and results, see Report.pdf
