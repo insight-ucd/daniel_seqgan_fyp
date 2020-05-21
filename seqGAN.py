@@ -1,9 +1,12 @@
+import pickle
+
 import model
 import train
 import lastFM
 
 import os.path
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 import random
 import time
@@ -31,7 +34,7 @@ def tokenize(s):
 
 def get_data():
     if not os.path.isfile('sessions.pkl') or not os.path.isfile('all_tracks.pkl'):
-        token_stream, all_tracks = get_sessions(100000)
+        token_stream, all_tracks = lastFM.get_sessions(100000)
         token_stream.to_pickle("sessions.pkl")
         output = open('all_tracks.pkl', 'wb')
         pickle.dump(all_tracks, output)
@@ -42,7 +45,7 @@ def get_data():
     return token_stream, all_tracks
 
 
-class BookGRU(GRU):
+class BookGRU(model.GRU):
 
     def d_optimizer(self, *args, **kwargs):
         return tf.compat.v1.train.AdamOptimizer()  # ignore learning rate
@@ -137,7 +140,7 @@ def run():
     for epoch in range(TRAIN_ITER // EPOCH_ITER):
         print('epoch', epoch)
         proportion_supervised = max(0.0, 1.0 - CURRICULUM_RATE * epoch)
-        train_epoch(
+        train.train_epoch(
             sess, trainable_model, EPOCH_ITER,
             proportion_supervised=proportion_supervised,
             g_steps=1, d_steps=D_STEPS,
