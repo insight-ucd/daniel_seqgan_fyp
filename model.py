@@ -1,10 +1,3 @@
-__doc__ = """RNN-based GAN.  For applying Generative Adversarial Networks to sequential data."""
-
-import numpy as np
-import tensorflow as tf
-from tensorflow.python.ops import tensor_array_ops, control_flow_ops
-
-
 def _cumsum(x, length):
     lower_triangular_ones = tf.constant(
         np.tril(np.ones((length, length))),
@@ -42,13 +35,13 @@ class RNN(object):
 
         self.expected_reward = tf.Variable(tf.zeros([self.sequence_length]))
 
-        with tf.variable_scope('generator'):
+        with tf.compat.v1.variable_scope('generator'):
             self.g_embeddings = tf.Variable(self.init_matrix([self.num_emb, self.emb_dim]))
             self.g_params.append(self.g_embeddings)
             self.g_recurrent_unit = self.create_recurrent_unit(self.g_params)  # maps h_tm1 to h_t for generator
             self.g_output_unit = self.create_output_unit(self.g_params, self.g_embeddings)  # maps h_t to o_t (output token logits)
 
-        with tf.variable_scope('discriminator'):
+        with tf.compat.v1.variable_scope('discriminator'):
             self.d_embeddings = tf.Variable(self.init_matrix([self.num_emb, self.emb_dim]))
             self.d_params.append(self.d_embeddings)
             self.d_recurrent_unit = self.create_recurrent_unit(self.d_params)  # maps h_tm1 to h_t for discriminator
@@ -56,9 +49,9 @@ class RNN(object):
             self.d_h0 = tf.Variable(self.init_vector([self.hidden_dim]))
             self.d_params.append(self.d_h0)
 
-        self.h0 = tf.placeholder(tf.float32, shape=[self.hidden_dim])  # initial random vector for generator
-        self.x = tf.placeholder(tf.int32, shape=[self.sequence_length])  # sequence of indices of true data, not including start token
-        self.samples = tf.placeholder(tf.float32, shape=[self.sequence_length])  # random samples from [0, 1]
+        self.h0 = tf.compat.v1.placeholder(tf.float32, shape=[self.hidden_dim])  # initial random vector for generator
+        self.x = tf.compat.v1.placeholder(tf.int32, shape=[self.sequence_length])  # sequence of indices of true data, not including start token
+        self.samples = tf.compat.v1.placeholder(tf.float32, shape=[self.sequence_length])  # random samples from [0, 1]
 
         # generator on initial randomness
         gen_o = tensor_array_ops.TensorArray(dtype=tf.float32, size=self.sequence_length,
@@ -73,7 +66,7 @@ class RNN(object):
             o_t = self.g_output_unit(h_t)
             sample = samples.read(i)
             o_cumsum = _cumsum(o_t, self.num_emb)  # prepare for sampling ***
-            next_token = tf.to_int32(tf.reduce_min(tf.where(sample < o_cumsum)))  # sample
+            next_token = tf.compat.v1.to_int32(tf.reduce_min(tf.where(sample < o_cumsum)))  # sample
             x_tp1 = tf.gather(self.g_embeddings, next_token)
             gen_o = gen_o.write(i, tf.gather(o_t, next_token))  # we only need the sampled token's probability
             gen_x = gen_x.write(i, next_token)  # indices, not embeddings
@@ -171,7 +164,7 @@ class RNN(object):
                 logits=self.d_real_predictions, labels=tf.ones([self.sequence_length])))
 
         # calculate generator rewards and loss
-        decays = tf.exp(tf.log(self.reward_gamma) * tf.to_float(tf.range(self.sequence_length)))
+        decays = tf.exp(tf.math.log(self.reward_gamma) * tf.compat.v1.to_float(tf.range(self.sequence_length)))
         rewards = _backwards_cumsum(decays * tf.sigmoid(self.d_gen_predictions),
                                     self.sequence_length)
         normalized_rewards = \
@@ -179,20 +172,20 @@ class RNN(object):
 
         self.reward_loss = tf.reduce_mean(normalized_rewards ** 2)
         self.g_loss = \
-            -tf.reduce_mean(tf.log(self.gen_o.stack()) * normalized_rewards)
+            -tf.reduce_mean(tf.math.log(self.gen_o.stack()) * normalized_rewards)
 
         # pretraining loss
         self.pretrain_loss = \
             (-tf.reduce_sum(
-                tf.one_hot(tf.to_int64(self.x),
-                           self.num_emb, 1.0, 0.0) * tf.log(self.g_predictions))
+                tf.one_hot(tf.compat.v1.to_int64(self.x),
+                           self.num_emb, 1.0, 0.0) * tf.math.log(self.g_predictions))
              / self.sequence_length)
 
         # training updates
         d_opt = self.d_optimizer(self.learning_rate)
         g_opt = self.g_optimizer(self.learning_rate)
         pretrain_opt = self.g_optimizer(self.learning_rate)
-        reward_opt = tf.train.GradientDescentOptimizer(self.learning_rate)
+        reward_opt = tf.compat.v1.train.GradientDescentOptimizer(self.learning_rate)
 
         self.d_gen_grad = tf.gradients(self.d_gen_loss, self.d_params)
         self.d_real_grad = tf.gradients(self.d_real_loss, self.d_params)
@@ -242,7 +235,7 @@ class RNN(object):
         return outputs
 
     def init_matrix(self, shape):
-        return tf.random_normal(shape, stddev=0.1)
+        return tf.compat.v1.random_normal(shape, stddev=0.1)
 
     def init_vector(self, shape):
         return tf.zeros(shape)
@@ -278,10 +271,10 @@ class RNN(object):
         return unit
 
     def d_optimizer(self, *args, **kwargs):
-        return tf.train.GradientDescentOptimizer(*args, **kwargs)
+        return tf.compat.v1.train.GradientDescentOptimizer(*args, **kwargs)
 
     def g_optimizer(self, *args, **kwargs):
-        return tf.train.GradientDescentOptimizer(*args, **kwargs)
+        return tf.compat.v1.train.GradientDescentOptimizer(*args, **kwargs)
 
 
 class GRU(RNN):
