@@ -1,3 +1,6 @@
+import numpy as np
+import random
+
 def train_epoch(sess, trainable_model, num_iter,
                 proportion_supervised, g_steps, d_steps,
                 next_sequence, results, epoch, verify_sequence=None,
