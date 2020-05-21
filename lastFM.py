@@ -1,144 +1,157 @@
+import model
+import train
+import lastFM
+
+import os.path
 import numpy as np
 import pandas as pd
-from itertools import islice
-import math
+import pickle
+import random
+import tensorflow as tf
 import time
-import statistics
+
+# HYPERPARAMETERS
+EMB_DIM = 20
+HIDDEN_DIM = 25
+SEQ_LENGTH = 10
+START_TOKEN = 0
+
+EPOCH_ITER = 1000
+CURRICULUM_RATE = 0.02  # how quickly to move from supervised training to unsupervised
+TRAIN_ITER = 100000  # generator/discriminator alternating
+D_STEPS = 3  # how many times to train the discriminator per generator step
+SEED = 88
 
 
 
-pd.options.display.max_columns = 10000
-pd.options.display.max_rows = 10000
+
+def tokenize(s):
+    return [c for c in ' '.join(s.split())]
 
 
-def read_data(nRows=None):
-    start_time = time.time()
-    directory = "lastfm-dataset-1K/userid-timestamp-artid-artname-traid-traname.tsv"
-    df = pd.read_csv(directory, engine='python',
-                          nrows=nRows, header=None, sep='\\t',
-                          names=['userId', 'date', 'artist_id', 'artist_name', 'track_id', 'track_name'])
-    df.dataframeName = 'userid-timestamp-artid-artname-traid-traname.tsv'
-    df.date = pd.to_datetime(df.date)
-    nRow, nCol = df.shape
-    print(f'There are {nRow} rows and {nCol} columns')
+def get_data():
+    if not os.path.isfile('sessions.pkl') or not os.path.isfile('all_tracks.pkl'):
+        token_stream, all_tracks = lastFM.get_sessions(100000)
+        token_stream.to_pickle("sessions.pkl")
+        output = open('all_tracks.pkl', 'wb')
+        pickle.dump(all_tracks, output)
+    else:
+        print("Sessions exist, using sessions.pkl and all_tracks.pkl")
+        token_stream = pd.read_pickle("sessions.pkl")
+        all_tracks = pd.read_pickle("all_tracks.pkl")
+    return token_stream, all_tracks
 
-    return df
 
-def summary_stats(df):
-    nan_values = df.track_id.isna().sum()
-    unique_tracks = len(df.track_name.unique())
-    print("There are {} NaN track_ids and {} unique tracks".format(nan_values, unique_tracks))
+class BookGRU(model.GRU):
+
+    def d_optimizer(self, *args, **kwargs):
+        return tf.compat.v1.train.AdamOptimizer()  # ignore learning rate
+
+    def g_optimizer(self, *args, **kwargs):
+        return tf.compat.v1.train.AdamOptimizer()  # ignore learning rate
+
+
+def get_trainable_model(num_emb):
+    return BookGRU(
+        num_emb, EMB_DIM, HIDDEN_DIM,
+        SEQ_LENGTH, START_TOKEN)
+
+
+def get_random_sequence(token_stream):
+    """Returns random subsequence."""
+
+
+    while True:
+        row_idx = random.randint(0, len(token_stream)-1)
+        if len(token_stream[row_idx]) >= SEQ_LENGTH:
+            break
+
+    start_idx = random.randint(0, len(token_stream[row_idx]) - SEQ_LENGTH)
+
+    return token_stream[row_idx][start_idx:start_idx + SEQ_LENGTH]
+
+
+def verify_sequence(three_grams, seq):
+    """Not a true verification; only checks 3-grams."""
+    for i in range(len(seq) - 3):
+        if tuple(seq[i:i + 3]) not in three_grams:
+            return False
+    return True
+
+def init_dict():
+    results = {}
+    results['d_losses'] = {}
+    results['supervised_g_losses'] = {}
+    results['unsupervised_g_losses'] = {}
+    results['supervised_generations'] = {}
+    results['unsupervised_generations'] = {}
+    results['rewards'] = {}
+    return results
+
+
+def run():
+    tf.compat.v1.disable_eager_execution()
+    random.seed(SEED)
+    np.random.seed(SEED)
     
-def find_repeated_tracks(session_frame):
-    repeats = {}
-
-    for row in session_frame.iloc[1]:
-        print(row)
-        i = 0
-
-        while i < (len(row) - 1):
-            if row[i] == row[i + 1]:
-                if 2 in repeats:
-                    repeats[2] += 1
-                else:
-                    repeats[2] = 1
-                j = i + 1
-                count = 3
-                while j < len(row) - 1:
-                    if row[j] == row[j + 1]:
-                        if count in repeats:
-                            repeats[count] += 1
-                        else:
-                            repeats[count] = 1
-                        j += 1
-                        count += 1
-                    else:
-                        i = j
-                        break
-            i += 1
-    return repeats    
-
-def print_top_tracks(all_tracks, nTracks=10):
-    sorted_tracks = [(k, (all_tracks[k]['artist'], all_tracks[k]['track_name'], all_tracks[k]['plays'])) for k in
-                     sorted(all_tracks, key=lambda x: all_tracks[x]['plays'], reverse=True)]
-
-    n_items = list(islice(sorted_tracks, 10))
-
-    print("\nTOP TRACKS")
-    print("{:<5s} {:<40s} {:<40s} {:<6s}".format("Rank","Artist","Track","Plays"))
-
-    for idx, tk in enumerate(n_items):
-        print("{:<5d} {:<40s} {:<40s} {:<6d} ".format(idx + 1, tk[1][0], tk[1][1], tk[1][2]))        
-
-def assign_unique_ids(df1):
-    print("Assigning unique track ids...")
-    unique_track_id = {}
-    start_time = time.time()
-
-    for idx, value in enumerate(df1.track_name.unique()):
-        unique_track_id[value] = idx
-
-    print(len(unique_track_id))
-    print("Completed in {:0.2f} seconds".format(time.time() - start_time))
+    token_stream, all_tracks = get_data() # Read in data & create sessions
+    results = init_dict() # initialise results dictionary
     
-    return unique_track_id
+    # create words from all track_ids
+    track_keys = []
+    for key in all_tracks.keys():
+        track_keys.append(key)
+    words = track_keys
 
-
-def sessions_from_tracks(daniel_track_id, tracks, df, session_size):
+    # create index to word dicttionary for track_ids
+    idx2word = {}
+    for i in range(len(all_tracks)):
+        idx2word[i] = all_tracks.get(i)['track_name']
+    
+    num_words = len(words)
+    three_grams = {}
     count=0
-    track_list = []
-    track_times = []
+    sec_count=0
 
-    sessions = pd.DataFrame(columns=['user_session_ID', 'session', 'start_time', 'length'])
+    # create dictionary of 3-gram verification values
+    for idx, row in token_stream.iteritems():
+        sec_count += len(row)
+        if len(row) > 3 :
+            for i in range(len(row) - 3):
+                three_grams[tuple(w for w in row[i:i + 3])] = True
+        else : count += len(row)
     
-    session_size = np.timedelta64(session_size, 'm') 
-    prev_time = np.timedelta64(0, 'us')
-
-    for idx, row in df.iterrows():
-        t_id = daniel_track_id[row.track_name]
-  #  Calculate track plays       
-        if t_id not in tracks:
-            tracks[t_id] = {'track_name': row.track_name,  'artist': row.artist_name, 'plays': 1}
-        else:
-            tracks[t_id]['plays'] += 1
-        track_list.append(daniel_track_id[row.track_name])
-        track_times.append(row.date)
-        
-        
-        if((row.date - prev_time)> session_size):
-            userID = (row.userId + '_session_' + str(count+1))
-            sessions = sessions.append({'user_session_ID': userID, 'session': track_list, 'start_time': track_times[0], 'length': (row.date - track_times[0])}, ignore_index=True)
-            count += 1
-            track_list = []
-            track_times = []
-        
-        prev_time = row.date
     
-    return sessions
+    # print("Less than |3| = ", count)
+    # print("Total count = ", sec_count)
+    # print('num words', num_words)
+    # print('stream length', len(token_stream))
+    # print('distinct 3-grams', len(three_grams))
 
-def sessions_from_frame(df1, daniel_track_id, session_size):
-    start_time = st = time.time()
-    all_tracks = {}
-    session_data = pd.DataFrame()
-    session_frame = pd.DataFrame(columns=['user_session_ID', 'session', 'start_time', 'length'])
+    trainable_model = get_trainable_model(num_words)
+    sess = tf.compat.v1.Session()
+    sess.run(tf.compat.v1.global_variables_initializer())
+    start_time = time.time()
+    print('Training...')
+    for D_STEPS in range(1,5):
+        for epoch in range(TRAIN_ITER // EPOCH_ITER):
+            print('epoch', epoch)
+            proportion_supervised = max(0.0, 1.0 - CURRICULUM_RATE * epoch)
+            train.train_epoch(
+                sess, trainable_model, EPOCH_ITER,
+                proportion_supervised=proportion_supervised,
+                g_steps=1, d_steps=D_STEPS,
+                next_sequence=lambda: get_random_sequence(token_stream),
+                verify_sequence=lambda seq: verify_sequence(three_grams, seq),
+                words=words, results=results, epoch=epoch)
 
-    for idx, group in df1.groupby('userId')[['date', 'track_id', 'track_name', 'artist_name']]:
-        group = group.sort_values(by='date', ascending=True)
-        group.date = pd.to_timedelta(group.date.astype('int64'), unit='ns')
-        session_data = sessions_from_tracks(daniel_track_id, all_tracks, group, session_size)
-        session_frame = session_frame.append(session_data, ignore_index=True)
+            print("Time taken: ", time.time()-start_time)
+  
+        # Save results for each value of D_STEPS
+        with open('results_'+str(D_STEPS)+'.pkl', 'wb') as handle:
+            pickle.dump(results, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        
+    return token_stream, all_tracks
 
-        start_time=time.time()
-      
-    return session_frame, all_tracks
-
-def get_sessions(nRows):
-
-    df = read_data(nRows)
-    summary_stats(df)
-    unique_ids = assign_unique_ids(df)
-    session_frame, all_tracks = sessions_from_frame(df, unique_ids, session_size=20)
-    print_top_tracks(all_tracks)
-    df_new = session_frame.session
-    
-    return df_new, all_tracks
+if __name__ == '__main__':
+    token_stream, all_tracks = run()
