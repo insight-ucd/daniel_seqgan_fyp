@@ -133,23 +133,23 @@ def run():
     sess.run(tf.compat.v1.global_variables_initializer())
     start_time = time.time()
     print('Training...')
-    for D_STEPS in range(1,5):
-        for epoch in range(TRAIN_ITER // EPOCH_ITER):
-            print('epoch', epoch)
-            proportion_supervised = max(0.0, 1.0 - CURRICULUM_RATE * epoch)
-            train_epoch(
-                sess, trainable_model, EPOCH_ITER,
-                proportion_supervised=proportion_supervised,
-                g_steps=1, d_steps=D_STEPS,
-                next_sequence=lambda: get_random_sequence(token_stream),
-                verify_sequence=lambda seq: verify_sequence(three_grams, seq),
-                words=words, results=results, epoch=epoch)
 
-            print("Time taken: ", time.time()-start_time)
-  
-        # Save results for each value of D_STEPS
-        with open('results_'+str(D_STEPS)+'.pkl', 'wb') as handle:
-            pickle.dump(results, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    for epoch in range(TRAIN_ITER // EPOCH_ITER):
+        print('epoch', epoch)
+        proportion_supervised = max(0.0, 1.0 - CURRICULUM_RATE * epoch)
+        train_epoch(
+            sess, trainable_model, EPOCH_ITER,
+            proportion_supervised=proportion_supervised,
+            g_steps=1, d_steps=D_STEPS,
+            next_sequence=lambda: get_random_sequence(token_stream),
+            verify_sequence=lambda seq: verify_sequence(three_grams, seq),
+            words=words, results=results, epoch=epoch)
+
+        print("Time taken: ", time.time()-start_time)
+
+    # Save results for each value of D_STEPS
+    with open('results_'+str(D_STEPS)+'.pkl', 'wb') as handle:
+        pickle.dump(results, handle, protocol=pickle.HIGHEST_PROTOCOL)
         
     return token_stream, all_tracks
 
