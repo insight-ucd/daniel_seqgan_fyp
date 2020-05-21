@@ -1,3 +1,8 @@
+import numpy as np
+import tensorflow as tf
+from tensorflow.python.ops import tensor_array_ops
+from tensorflow.python.ops.list_ops import control_flow_ops
+
 def _cumsum(x, length):
     lower_triangular_ones = tf.constant(
         np.tril(np.ones((length, length))),
