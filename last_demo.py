@@ -1,9 +1,3 @@
-from __future__ import print_function
-
-import codecs
-
-__doc__ = """Char-based Seq-GAN on data from a book."""
-
 import model
 import train
 import lastFM
@@ -16,6 +10,7 @@ import time
 import subprocess
 import gzip
 
+# HYPERPARAMETERS
 EMB_DIM = 20
 HIDDEN_DIM = 25
 SEQ_LENGTH = 10
@@ -35,18 +30,25 @@ def tokenize(s):
 
 
 def get_data():
-    token_stream, all_tracks = lastFM.get_sessions(100000)
-    print("TS: ",type(token_stream), len(token_stream), type(token_stream.values.tolist()))
+    if not os.path.isfile('sessions.pkl') or not os.path.isfile('all_tracks.pkl'):
+        token_stream, all_tracks = get_sessions(100000)
+        token_stream.to_pickle("sessions.pkl")
+        output = open('all_tracks.pkl', 'wb')
+        pickle.dump(all_tracks, output)
+    else:
+        print("Sessions exist, using sessions.pkl and all_tracks.pkl")
+        token_stream = pd.read_pickle("sessions.pkl")
+        all_tracks = pd.read_pickle("all_tracks.pkl")
     return token_stream, all_tracks
 
 
-class BookGRU(model.GRU):
+class BookGRU(GRU):
 
     def d_optimizer(self, *args, **kwargs):
-        return tf.train.AdamOptimizer()  # ignore learning rate
+        return tf.compat.v1.train.AdamOptimizer()  # ignore learning rate
 
     def g_optimizer(self, *args, **kwargs):
-        return tf.train.AdamOptimizer()  # ignore learning rate
+        return tf.compat.v1.train.AdamOptimizer()  # ignore learning rate
 
 
 def get_trainable_model(num_emb):
@@ -64,7 +66,6 @@ def get_random_sequence(token_stream):
         if len(token_stream[row_idx]) >= SEQ_LENGTH:
             break
 
-
     start_idx = random.randint(0, len(token_stream[row_idx]) - SEQ_LENGTH)
 
     return token_stream[row_idx][start_idx:start_idx + SEQ_LENGTH]
@@ -75,67 +76,82 @@ def verify_sequence(three_grams, seq):
     for i in range(len(seq) - 3):
         if tuple(seq[i:i + 3]) not in three_grams:
             return False
-    print("***!!! True ", tuple(seq[i:i + 3]))
     return True
 
+def init_dict():
+    results = {}
+    results['d_losses'] = {}
+    results['supervised_g_losses'] = {}
+    results['unsupervised_g_losses'] = {}
+    results['supervised_generations'] = {}
+    results['unsupervised_generations'] = {}
+    results['rewards'] = {}
+    return results
 
-def main():
+
+def run():
+    tf.compat.v1.disable_eager_execution()
     random.seed(SEED)
     np.random.seed(SEED)
-
-    token_stream, all_tracks = get_data()
-    assert START_TOKEN == 0
+    
+    token_stream, all_tracks = get_data() # Read in data & create sessions
+    results = init_dict() # initialise results dictionary
+    
+    # create words from all track_ids
     track_keys = []
     for key in all_tracks.keys():
         track_keys.append(key)
-    words = ['_START'] + track_keys
-    print(words)
+    words = track_keys
 
-    print("At type: ",type(all_tracks))
+    # create index to word dicttionary for track_ids
     idx2word = {}
-    print("LEN: ", len(all_tracks))
     for i in range(len(all_tracks)):
-
         idx2word[i] = all_tracks.get(i)['track_name']
-    # word2idx = dict((word, i) for i, word in enumerate(words))
-    #print("W2I: ", idx2word)
+    
     num_words = len(words)
     three_grams = {}
     count=0
     sec_count=0
+
+    # create dictionary of 3-gram verification values
     for idx, row in token_stream.iteritems():
         sec_count += len(row)
         if len(row) > 3 :
             for i in range(len(row) - 3):
                 three_grams[tuple(w for w in row[i:i + 3])] = True
         else : count += len(row)
-    # three_grams = dict((tuple(word2idx[w] for w in token_stream[i:i + 3]), True)
-    #                    for i in range(len(token_stream) - 3))
-    #print("3Grams ", three_grams)
-    print("Less than |3| = ", count)
-    print("Total count = ", sec_count)
-    print('num words', num_words)
-    print('stream length', len(token_stream))
-    print('distinct 3-grams', len(three_grams))
+    
+    
+    # print("Less than |3| = ", count)
+    # print("Total count = ", sec_count)
+    # print('num words', num_words)
+    # print('stream length', len(token_stream))
+    # print('distinct 3-grams', len(three_grams))
 
     trainable_model = get_trainable_model(num_words)
-    sess = tf.Session()
-    sess.run(tf.global_variables_initializer())
+    sess = tf.compat.v1.Session()
+    sess.run(tf.compat.v1.global_variables_initializer())
     start_time = time.time()
-    print('training')
-    for epoch in range(TRAIN_ITER // EPOCH_ITER):
-        print('epoch', epoch)
-        proportion_supervised = max(0.0, 1.0 - CURRICULUM_RATE * epoch)
-        train.train_epoch(
-            sess, trainable_model, EPOCH_ITER,
-            proportion_supervised=proportion_supervised,
-            g_steps=1, d_steps=D_STEPS,
-            next_sequence=lambda: get_random_sequence(token_stream),
-            verify_sequence=lambda seq: verify_sequence(three_grams, seq),
-            words=words)
+    print('Training...')
+    for D_STEPS in range(1,5):
+        for epoch in range(TRAIN_ITER // EPOCH_ITER):
+            print('epoch', epoch)
+            proportion_supervised = max(0.0, 1.0 - CURRICULUM_RATE * epoch)
+            train_epoch(
+                sess, trainable_model, EPOCH_ITER,
+                proportion_supervised=proportion_supervised,
+                g_steps=1, d_steps=D_STEPS,
+                next_sequence=lambda: get_random_sequence(token_stream),
+                verify_sequence=lambda seq: verify_sequence(three_grams, seq),
+                words=words, results=results, epoch=epoch)
 
-        print("Time taken: ", time.time()-start_time)
-        start_time = time.time()
+            print("Time taken: ", time.time()-start_time)
+  
+        # Save results for each value of D_STEPS
+        with open('results_'+str(D_STEPS)+'.pkl', 'wb') as handle:
+            pickle.dump(results, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        
+    return token_stream, all_tracks
 
 if __name__ == '__main__':
-    main()
+    token_stream, all_tracks = run()
